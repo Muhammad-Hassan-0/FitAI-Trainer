@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+GymTrainerApp/node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+.venv/
+venv/
+
+# Secrets — NEVER commit
+.env
+backend/.env
+*.pem
+*.key
+
+# Local databases
+backend/instance/*.db
+*.sqlite3
+
+# Expo / React Native
+GymTrainerApp/.expo/
+GymTrainerApp/dist/
+GymTrainerApp/build/
+.expo/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+~$*
+*.tmp
+
+# Logs
+*.log
+npm-debug.log*
+
+# Large generated caches
+.ch5_audit.txt

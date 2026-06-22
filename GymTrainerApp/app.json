@@ -1,0 +1,68 @@
+{
+  "expo": {
+    "name": "FitAI Trainer",
+    "slug": "fitai-trainer",
+    "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "sdkVersion"
+    },
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#090909"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.fitai.trainer",
+      "buildNumber": "1"
+    },
+    "android": {
+      "googleServicesFile": "./google-services.json",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#090909"
+      },
+      "package": "com.fitai.trainer",
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.VIBRATE",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.USE_EXACT_ALARM"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "webpack"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "FitAI Trainer needs camera access to monitor your exercise form in real-time."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "FitAI Trainer needs photo access to analyze food for calorie tracking.",
+          "cameraPermission": "FitAI Trainer needs camera access to analyze your exercise form and food."
+        }
+      ],
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "0fb093c2-af02-446d-a30d-165fd86db778"
+      }
+    },
+    "owner": "hammadsaleem.ds"
+  }
+}

@@ -1,0 +1,301 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{setspace}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  urlcolor=blue
+}
+\setstretch{1.15}
+
+\title{\textbf{FitAI Trainer App}\\Complete Technical and Functional Report}
+\author{Project Team}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\section{Project Overview}
+FitAI Trainer is a cross-platform fitness application built with React Native and Expo. The app provides personalized workout support, AI chat assistance, live exercise monitoring, nutrition guidance, progress tracking, and user profile management.
+
+\subsection{Primary Goals}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Provide an easy onboarding and authentication experience.
+  \item Deliver AI-assisted guidance for fitness and nutrition.
+  \item Track user workout sessions, reps, form quality, and progress.
+  \item Support both online and offline usage with reliable data handling.
+  \item Offer deployment for Android APK and web testing.
+\end{itemize}
+
+\section{Technology Stack}
+\subsection{Frontend (Mobile + Web)}
+\begin{itemize}[leftmargin=1.2cm]
+  \item React Native (Expo SDK 50)
+  \item React Navigation (Stack + Bottom Tabs)
+  \item AsyncStorage (local persistence)
+  \item Expo Camera, Expo Image Picker, Expo Speech, Expo Linear Gradient
+  \item react-native-safe-area-context (safe layout on modern phones)
+\end{itemize}
+
+\subsection{Backend and AI Services}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Python backend API (for auth, plans, stats, pose analysis, AI endpoints)
+  \item Gemini-backed AI endpoints via backend proxy
+  \item RESTful integration from app through centralized API client
+\end{itemize}
+
+\subsection{AI/ML Models Used (Exact)}
+\begin{itemize}[leftmargin=1.2cm]
+  \item \textbf{Primary LLM for chat/advice:} \texttt{gemini-2.5-flash}
+  \item \textbf{Fallback LLM chain (auto):} \texttt{gemini-2.0-flash} $\rightarrow$ \texttt{gemini-2.0-flash-lite} $\rightarrow$ \texttt{gemini-1.5-flash}
+  \item \textbf{Plan generation models:} \texttt{gemini-2.5-flash}, \texttt{gemini-2.0-flash}, \texttt{gemini-2.0-flash-lite}, \texttt{gemini-flash-latest} (fallback sequence)
+  \item \textbf{Vision model for image analysis:} \texttt{gemini-1.5-flash} (food/exercise/general image prompts)
+  \item \textbf{Pose/landmark model for live monitoring backend:} MediaPipe BlazePose (Full variant, \texttt{model\_complexity=1})
+\end{itemize}
+
+\subsection{Teacher-Friendly Explanation (Simple)}
+\begin{itemize}[leftmargin=1.2cm]
+  \item \textbf{Which model powers the chatbot?} The backend uses the Gemini model family. The default model is \texttt{gemini-2.5-flash}; if unavailable, the system automatically switches to the fallback chain.
+  \item \textbf{How does live pose detection work?} Live monitoring does not use Gemini. It uses a computer-vision pose model (MediaPipe BlazePose). The backend extracts body keypoints (shoulders, hips, knees, ankles, etc.) from each frame and computes angles.
+  \item \textbf{How are reps counted?} Each exercise has threshold angle ranges (for example, squat down/up angles). When the angle transitions through these ranges, stage transitions are detected and reps are incremented.
+  \item \textbf{How are quiz-based recommendations generated?} Quiz answers (goal, level, body type, available time, health issue) are sent to the backend. The plan generator first attempts Gemini-based personalized JSON plan generation. If model generation fails, a rule-based fallback engine generates a safe plan.
+  \item \textbf{Which model is used for image analysis?} Food and exercise photo analysis is processed through the backend using \texttt{gemini-1.5-flash} vision flow.
+\end{itemize}
+
+\subsection{Database and Cloud}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Firebase Authentication (email/password flows available in project service layer)
+  \item Firebase Firestore for cloud profile/session/stat data structures
+  \item AsyncStorage as offline-first local storage
+\end{itemize}
+
+\section{System Architecture}
+\subsection{High-Level Architecture}
+\begin{enumerate}[leftmargin=1.2cm]
+  \item \textbf{UI Layer:} Screens and components in React Native.
+  \item \textbf{Navigation Layer:} Auth flow + Main tab flow + feature detail stacks.
+  \item \textbf{Service Layer:} \texttt{src/services/api.js} and \texttt{src/services/firebase.js}.
+  \item \textbf{Data Layer:} AsyncStorage local state + optional Firebase cloud sync + backend APIs.
+\end{enumerate}
+
+\subsection{Navigation Structure}
+\begin{itemize}[leftmargin=1.2cm]
+  \item \textbf{Startup routes:} Splash, Onboarding, Auth
+  \item \textbf{Main tabs:} Dashboard, Weekly Plan, Diet, Progress, Profile
+  \item \textbf{Feature stacks:} Exercise Plan, Live Exercise, Exercise Detail, Notifications, AI Chat, Admin
+\end{itemize}
+
+\section{Core Module Implementation}
+\subsection{Authentication Module}
+\textbf{Screen:} \texttt{AuthScreen.js}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Supports Sign In and Sign Up modes.
+  \item Uses API auth endpoints: \texttt{/auth/register}, \texttt{/auth/login}.
+  \item Implements retry logic for transient network failures.
+  \item On success:
+  \begin{itemize}
+    \item stores token in AsyncStorage,
+    \item stores user profile locally,
+    \item routes user to Onboarding or Main flow.
+  \end{itemize}
+  \item Includes offline fallback mode for delivery-safe login continuity.
+\end{itemize}
+
+\subsection{Onboarding and Plan Generation}
+\textbf{Screen:} \texttt{OnboardingScreen.js}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Captures user fitness goals, level, body type, time, and health factors.
+  \item Normalizes answers into backend plan format.
+  \item Calls plan endpoint: \texttt{/generate-plan}.
+  \item Stores generated plan and versions in local storage for immediate app use.
+\end{itemize}
+
+\subsection{AI Chatbot Module}
+\textbf{Screen:} \texttt{AIChatScreen.js}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Multi-language conversation support (English, Urdu, Arabic).
+  \item Text question handling through endpoint: \texttt{/ai-advice}.
+  \item Image-based analysis through endpoint: \texttt{/analyze-image}.
+  \item Model usage in backend:
+  \begin{itemize}
+    \item text advice/messages generated via Gemini chat model chain,
+    \item image analysis requests routed to Gemini vision model.
+  \end{itemize}
+  \item User can send image types such as:
+  \begin{itemize}
+    \item Food and calorie analysis,
+    \item Exercise form snapshot analysis,
+    \item General fitness visual analysis.
+  \end{itemize}
+  \item Conversation UX includes typing states, quick suggestions, and message timeline.
+\end{itemize}
+
+\subsection{Live Exercise Monitor Module}
+\textbf{Screen:} \texttt{LiveExerciseScreen.js}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Uses device camera feed through Expo Camera.
+  \item Frame analysis interval tuned by platform for performance balance.
+  \item Sends image frame data to endpoint: \texttt{/analyze-pose}.
+  \item Backend pose pipeline is powered by MediaPipe BlazePose for keypoint extraction and angle-based stage detection.
+  \item Evaluates motion stages and angle thresholds for rep counting logic.
+  \item Tracks:
+  \begin{itemize}
+    \item reps,
+    \item exercise stage,
+    \item estimated form accuracy,
+    \item session timer.
+  \end{itemize}
+  \item Voice cues via Expo Speech for real-time coaching feedback.
+  \item At session end:
+  \begin{itemize}
+    \item local stats updated,
+    \item backend session save attempted via \texttt{/sessions},
+    \item progress update event emitted to refresh dashboard/progress screens.
+  \end{itemize}
+\end{itemize}
+
+\subsection{Progress and Analytics Module}
+\textbf{Screen:} \texttt{ProgressScreen.js}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Reads local and remote stats.
+  \item Consumes endpoints: \texttt{/stats}, \texttt{/sessions}.
+  \item Computes weekly reps and exercise distribution breakdown.
+  \item Displays trend and milestone-oriented feedback.
+\end{itemize}
+
+\subsection{Diet and Nutrition Module}
+\textbf{Screen:} \texttt{DietPlanScreen.js}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Maintains food logs and nutrition calculations.
+  \item Supports day-based entries and check-ins.
+  \item Complements chatbot visual analysis for meal guidance.
+\end{itemize}
+
+\subsection{Profile and Preferences Module}
+\textbf{Screen:} \texttt{ProfileScreen.js}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Manages profile details and fitness preference settings.
+  \item Theme preference saved in \texttt{appPrefs}.
+  \item Theme updates are fully applied via controlled reload strategy.
+  \item Android touch reliability improved for toggle actions.
+\end{itemize}
+
+\section{Data Management and Reliability}
+\subsection{Offline-First Approach}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Critical app data is always saved locally first via AsyncStorage.
+  \item Session sync queue (\texttt{sessionSyncQueue}) stores unsent sessions if API fails.
+  \item Queue flush runs automatically before session/stat reads and after successful writes.
+\end{itemize}
+
+\subsection{Request Stability}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Unified request utility with timeout and retry support.
+  \item Handles Android runtime differences where \texttt{AbortSignal.timeout} may not exist.
+  \item Includes safer response parsing and structured error handling.
+\end{itemize}
+
+\subsection{Firebase Integration (Project Service Layer)}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Firebase auth and Firestore service wrappers are implemented.
+  \item Methods include user profile, onboarding answers, sessions, stats, diet logs, preferences.
+  \item Hybrid helper supports local save + optional cloud sync.
+\end{itemize}
+
+\section{UI/UX and Responsiveness Implementation}
+\subsection{Responsive Strategy}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Screen-size breakpoints for small phones and tablet widths.
+  \item Percentage/flexible layouts and scalable typography.
+  \item Safe-area migration to \texttt{react-native-safe-area-context} across major screens.
+  \item Bottom tab sizing and padding adjusted using live safe-area insets.
+\end{itemize}
+
+\subsection{Result}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Improved header placement consistency.
+  \item Better bottom control visibility on gesture-navigation devices.
+  \item More stable interaction behavior on Android for profile toggles.
+\end{itemize}
+
+\section{Feature List (Delivered)}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Authentication (Sign In / Sign Up / Guest mode)
+  \item Onboarding with fitness personalization
+  \item AI chatbot (text + image analysis)
+  \item Live camera-based exercise monitoring with voice cues
+  \item Weekly and daily workout planning
+  \item Exercise detail pages with tutorials
+  \item Diet logging and nutrition assistant flows
+  \item Progress dashboard and statistics
+  \item Notifications and guidance tips
+  \item Profile management and app preferences
+  \item Admin panel for controlled management flows
+\end{itemize}
+
+\section{How the App Works End-to-End}
+\begin{enumerate}[leftmargin=1.2cm]
+  \item User opens app, route is selected based on local token/onboarding state.
+  \item User authenticates and profile context is stored.
+  \item Onboarding captures user fitness parameters and generates personalized plan.
+  \item User performs workouts (manual screens or live monitoring).
+  \item Session events and stats are stored locally and synced to backend when available.
+  \item AI chatbot assists with fitness and nutrition queries and image analysis.
+  \item Progress views aggregate sessions and show metrics and milestones.
+\end{enumerate}
+
+\section{Run Instructions}
+\subsection{Mobile Development (Expo)}
+\begin{verbatim}
+cd "d:\client working folder\hassan project\GymTrainerApp"
+npm install
+npx expo start
+\end{verbatim}
+Then scan QR with Expo Go or run emulator target.
+
+\subsection{Android APK Build (EAS)}
+\begin{verbatim}
+cd "d:\client working folder\hassan project\GymTrainerApp"
+npx eas login
+npx eas build -p android --profile apk
+\end{verbatim}
+
+\subsection{Web/Chrome Run}
+\begin{verbatim}
+cd "d:\client working folder\hassan project\GymTrainerApp"
+npm install
+npx expo start --web
+\end{verbatim}
+Note: app config uses webpack for web in current setup.
+
+\section{Backend Connectivity Notes}
+\begin{itemize}[leftmargin=1.2cm]
+  \item API base URL is controlled by \texttt{EXPO\_PUBLIC\_API\_URL}.
+  \item Default behavior:
+  \begin{itemize}
+    \item Android emulator uses \texttt{10.0.2.2},
+    \item iOS/web-local uses \texttt{127.0.0.1}.
+  \end{itemize}
+  \item For physical phone testing, API should point to LAN IP backend URL.
+\end{itemize}
+
+\section{Testing and Validation Summary}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Navigation flow validation across auth, onboarding, tabs, and detail routes.
+  \item API compile/export verification for Android bundle.
+  \item Safe-area and responsive checks implemented across major screens.
+  \item Profile interaction fixes validated at code level for Android touch handling.
+\end{itemize}
+
+\section{Conclusion}
+The FitAI Trainer application is implemented as a production-oriented, feature-rich fitness platform with AI assistance, camera-based monitoring, personalized plan generation, and robust offline-aware data handling. The architecture supports both rapid iteration and scalable feature growth through a clean service layer, modular screens, and hybrid data persistence.
+
+\end{document}

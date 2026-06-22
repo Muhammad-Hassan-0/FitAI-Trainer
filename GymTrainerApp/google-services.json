@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "586940717107",
+    "project_id": "fitai-trainer-1b398",
+    "storage_bucket": "fitai-trainer-1b398.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:586940717107:android:b24b127073371d50dcab46",
+        "android_client_info": {
+          "package_name": "com.fitai.trainer"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAi5PsIrQtNoxqxRUYdzRCgTHHY8Im3Les"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
