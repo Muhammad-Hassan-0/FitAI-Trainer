@@ -14,11 +14,12 @@ import * as Speech from 'expo-speech';
 import { C } from '../theme';
 import YouTubePlayer from '../components/YouTubePlayer';
 import { getExerciseVideoId } from '../data/exerciseVideos';
+import { createRepCounter } from '../utils/repCounter';
 
 const { width, height } = Dimensions.get('window');
 const IS_SMALL = width < 360;
 const IS_TABLET = width >= 768;
-const FRAME_ANALYSIS_INTERVAL_MS = Platform.OS === 'android' ? 700 : 500;
+const FRAME_ANALYSIS_INTERVAL_MS = Platform.OS === 'android' ? 600 : 450;
 
 // ── Per-exercise config with YouTube tutorials ──────────────────────────────
 const EXERCISE_CONFIG = {
@@ -181,7 +182,8 @@ export default function LiveExerciseScreen({ route, navigation }) {
   const [timer, setTimer] = useState(0);
   const [set, setSet] = useState(1);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [facing, setFacing] = useState('front');
+  const [formErrors, setFormErrors] = useState([]);
+  const [facing, setFacing] = useState('back');
   const [aiFeeback, setAiFeedback] = useState('');
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [accuracy, setAccuracy] = useState(100);
@@ -216,14 +218,26 @@ export default function LiveExerciseScreen({ route, navigation }) {
 
   const cameraRef = useRef(null);
   const timerRef = useRef(null);
-  const processingRef = useRef(null);
-  const stageRef = useRef(STAGES.IDLE);
+  const captureIntervalRef = useRef(null);
+  const isCapturingRef = useRef(false);
+  const demoModeRef = useRef(false);
+  const repCounterRef = useRef(null);
+  const missedFramesRef = useRef(0);
+  const lastPoseRef = useRef(null);
   const countdownRef = useRef(null);
+
+  if (!repCounterRef.current) {
+    repCounterRef.current = createRepCounter({
+      inverted: exercise.id === 'curl',
+      downEnter: exercise.id === 'curl' ? 50 : 110,
+      upEnter: exercise.id === 'curl' ? 140 : 150,
+    });
+  }
 
   useEffect(() => {
     return () => {
       clearInterval(timerRef.current);
-      clearInterval(processingRef.current);
+      clearInterval(captureIntervalRef.current);
       clearInterval(countdownRef.current);
       Speech.stop();
     };
@@ -231,6 +245,7 @@ export default function LiveExerciseScreen({ route, navigation }) {
 
   // ── Countdown ──────────────────────────────────────────────────────────────
   const startCountdown = async () => {
+    demoModeRef.current = false;
     if (!permission?.granted) {
       const result = await requestPerm();
       if (!result.granted) {
@@ -259,35 +274,84 @@ export default function LiveExerciseScreen({ route, navigation }) {
     setPhase(PHASES.ACTIVE);
     setIsStarted(true);
     setRepCount(0);
+    setGoodReps(0);
+    setFormErrors([]);
     setTimer(0);
-    setFeedback('Get into position — let\'s go!');
+    setFeedback('Stand 6 feet back — full body visible, then start moving!');
     setFeedbackColor(C.lime);
-
+    repCounterRef.current?.reset();
+    missedFramesRef.current = 0;
+    lastPoseRef.current = null;
     timerRef.current = setInterval(() => setTimer(t => t + 1), 1000);
-    processingRef.current = setInterval(() => captureAndAnalyze(), FRAME_ANALYSIS_INTERVAL_MS);
+    isCapturingRef.current = false;
+    captureIntervalRef.current = setInterval(() => captureAndAnalyze(), FRAME_ANALYSIS_INTERVAL_MS);
   };
 
   const captureAndAnalyze = async () => {
-    if (isProcessing || !cameraRef.current) return;
-    setIsProcessing(true);
+    if (isCapturingRef.current) return;
+    if (!demoModeRef.current && !cameraRef.current) return;
+
+    isCapturingRef.current = true;
     try {
+      let data;
+      if (demoModeRef.current) {
+        simulatePoseDetection();
+        return;
+      }
+
       const photo = await cameraRef.current.takePictureAsync({
-        base64: true, quality: 0.3, skipProcessing: true,
+        base64: true,
+        quality: 0.4,
+        skipProcessing: true,
       });
-      const data = await poseAPI.analyzeFrame(photo.base64, exercise.id);
-      if (data) handlePoseData(data);
-      else simulatePoseDetection();
+
+      data = await poseAPI.analyzeFrame(photo.base64, exercise.id);
+
+      if (!data || data.detected === false) {
+        missedFramesRef.current += 1;
+        if (missedFramesRef.current >= 4) {
+          setFeedback('Adjust camera — show your full body from head to feet');
+          setFeedbackColor(C.gold);
+          setFormErrors(data?.form_warnings || [{ message: 'Body not fully visible' }]);
+        } else if (lastPoseRef.current) {
+          handlePoseData(lastPoseRef.current, true);
+        }
+        return;
+      }
+
+      missedFramesRef.current = 0;
+      lastPoseRef.current = data;
+      handlePoseData(data);
     } catch (_) {
-      simulatePoseDetection();
+      missedFramesRef.current += 1;
+      if (missedFramesRef.current >= 3) {
+        setFeedback('Cannot reach server — start backend: python app.py');
+        setFeedbackColor(C.red);
+      }
     } finally {
-      setIsProcessing(false);
+      isCapturingRef.current = false;
     }
   };
 
   const simulatePoseDetection = () => {
-    const cycle = Math.floor(Date.now() / 1500) % 2;
-    const angle = cycle === 0 ? 85 + Math.random() * 10 : 165 + Math.random() * 10;
-    handlePoseData({ angle, joint: config.joint, is_correct: true });
+    const cycle = Math.floor(Date.now() / 2200) % 2;
+    const angle = cycle === 0 ? 95 : 165;
+    handlePoseData({
+      angle,
+      joint: config.joint,
+      is_correct: true,
+      detected: true,
+      confidence: 85,
+      form_errors: [],
+      form_warnings: [],
+      depth_ok: cycle === 0,
+      position: cycle === 0 ? 'bottom' : 'top',
+      thresholds: {
+        down_enter: exercise.id === 'curl' ? 50 : 110,
+        up_enter: exercise.id === 'curl' ? 140 : 150,
+        inverted: exercise.id === 'curl',
+      },
+    });
   };
 
   const speak = (text) => {
@@ -295,60 +359,94 @@ export default function LiveExerciseScreen({ route, navigation }) {
     try { Speech.speak(text, { language: 'en', rate: 1.1, pitch: 1.0 }); } catch (_) {}
   };
 
-  const handlePoseData = (data) => {
+  const handlePoseData = (data, isCached = false) => {
     const { angle } = data;
+    if (angle == null || Number.isNaN(angle)) return;
+
     const roundedAngle = Math.round(angle);
     setCurrentAngle(roundedAngle);
     Animated.timing(angleAnim, { toValue: roundedAngle, duration: 200, useNativeDriver: false }).start();
 
-    if (['squat', 'pushup', 'lunge'].includes(exercise.id)) {
-      if (angle < config.downAngle) {
-        if (stageRef.current === STAGES.UP) {
-          setRepCount(prev => {
-            const n = prev + 1;
-            speak(`${n}`);
-            if (n >= config.targetReps) { handleSetComplete(); speak('Set complete! Great work!'); }
-            return n;
-          });
-          setGoodReps(g => g + 1);
-          setAccuracy(prev => Math.min(100, Math.round((prev * 0.8) + (data.is_correct !== false ? 20 : 12))));
-          Vibration.vibrate(50);
+    const errors = data.form_errors || [];
+    const warnings = data.form_warnings || [];
+    const displayIssues = [...errors, ...warnings];
+    if (!isCached) setFormErrors(displayIssues);
+
+    if (exercise.id === 'plank') {
+      const ok = warnings.length === 0 && errors.length === 0;
+      setStage(ok ? STAGES.CORRECT : STAGES.WRONG);
+      setFeedback(data.feedback || (ok ? config.correctText : config.wrongText));
+      setFeedbackColor(ok ? C.lime : C.gold);
+      return;
+    }
+
+    const result = repCounterRef.current?.process(angle, data);
+
+    if (result?.event === 'rep') {
+      setRepCount(prev => {
+        const n = prev + 1;
+        speak(`${n}`);
+        if (n >= config.targetReps) {
+          handleSetComplete();
+          speak('Set complete! Great work!');
         }
-        stageRef.current = STAGES.DOWN;
-        setStage(STAGES.DOWN);
-        setFeedback(config.upText);
+        return n;
+      });
+
+      if (result.quality === 'good') {
+        setGoodReps(g => g + 1);
+        setAccuracy(prev => Math.min(100, Math.round(prev * 0.8 + 20)));
+        Vibration.vibrate(50);
+        setFeedback(`Rep counted! ${result.message || 'Good form!'}`);
         setFeedbackColor(C.lime);
-      } else if (angle > config.upAngle) {
-        if (stageRef.current !== STAGES.UP) speak(config.downText);
-        stageRef.current = STAGES.UP;
-        setStage(STAGES.UP);
-        setFeedback(config.downText);
-        setFeedbackColor(C.brand);
       } else {
-        setFeedback(config.correctText);
+        setAccuracy(prev => Math.max(40, Math.round(prev * 0.85 + 8)));
+        Vibration.vibrate([0, 35, 35, 35]);
+        setFeedback(`Rep counted — ${result.message || 'watch your form'}`);
         setFeedbackColor(C.gold);
+        speak('Rep counted, check form');
       }
-    } else if (exercise.id === 'curl') {
-      if (angle > config.downAngle) {
-        stageRef.current = STAGES.UP;
-        setStage(STAGES.UP);
-        setFeedback(config.upText);
-        setFeedbackColor(C.brand);
-      } else if (angle < config.upAngle) {
-        if (stageRef.current === STAGES.UP) {
-          setRepCount(prev => prev + 1);
-          Vibration.vibrate(50);
-        }
-        stageRef.current = STAGES.DOWN;
-        setStage(STAGES.DOWN);
-        setFeedback(config.downText);
-        setFeedbackColor(C.lime);
-      }
+      return;
+    }
+
+    if (result?.event === 'shallow') {
+      Vibration.vibrate([0, 50, 50, 50]);
+      setFeedback(result.message || 'Go deeper — rep not counted');
+      setFeedbackColor(C.red);
+      setStage(STAGES.WRONG);
+      speak('Go deeper');
+      return;
+    }
+
+    const primaryFeedback = data.feedback || config.correctText;
+    const hasErrors = errors.length > 0;
+    const hasWarnings = warnings.length > 0;
+
+    if (hasErrors) {
+      setFeedback(primaryFeedback);
+      setFeedbackColor(C.red);
+      setStage(STAGES.WRONG);
+    } else if (hasWarnings) {
+      setFeedback(primaryFeedback);
+      setFeedbackColor(C.gold);
+      setStage(STAGES.WRONG);
+    } else if (data.position === 'bottom') {
+      setStage(STAGES.DOWN);
+      setFeedback(primaryFeedback);
+      setFeedbackColor(C.lime);
+    } else if (data.position === 'top') {
+      setStage(STAGES.UP);
+      setFeedback(primaryFeedback);
+      setFeedbackColor(C.brand);
+    } else {
+      setStage(STAGES.CORRECT);
+      setFeedback(primaryFeedback);
+      setFeedbackColor(C.text);
     }
   };
 
   const handleSetComplete = () => {
-    clearInterval(processingRef.current);
+    clearInterval(captureIntervalRef.current);
     setIsStarted(false);
     Vibration.vibrate([0, 100, 100, 100]);
     setFeedback('Set Complete! 🎉');
@@ -357,7 +455,7 @@ export default function LiveExerciseScreen({ route, navigation }) {
 
   const stopExercise = async () => {
     clearInterval(timerRef.current);
-    clearInterval(processingRef.current);
+    clearInterval(captureIntervalRef.current);
     setIsStarted(false);
     saveSession();
     fetchAIFeedback();
@@ -566,12 +664,15 @@ export default function LiveExerciseScreen({ route, navigation }) {
               </LinearGradient>
             </TouchableOpacity>
             <TouchableOpacity style={styles.ctaBtnSecondary} onPress={() => {
+              demoModeRef.current = true;
               setPhase(PHASES.ACTIVE);
               setIsStarted(true);
               setRepCount(0);
+              setGoodReps(0);
               setTimer(0);
+              repCounterRef.current?.reset();
               timerRef.current = setInterval(() => setTimer(t => t + 1), 1000);
-              processingRef.current = setInterval(() => simulatePoseDetection(), FRAME_ANALYSIS_INTERVAL_MS);
+              captureIntervalRef.current = setInterval(() => captureAndAnalyze(), FRAME_ANALYSIS_INTERVAL_MS);
             }}>
               <Text style={styles.ctaBtnSecondaryText}>Skip Camera — Use Demo Mode</Text>
             </TouchableOpacity>
@@ -763,6 +864,22 @@ export default function LiveExerciseScreen({ route, navigation }) {
       {/* Feedback Card */}
       <View style={[styles.feedbackCard, { borderColor: feedbackColor + '50' }]}>
         <Text style={[styles.feedbackText, { color: feedbackColor }]}>{feedback}</Text>
+        {formErrors.length > 0 && (
+          <View style={styles.errorList}>
+            {formErrors.slice(0, 2).map((err, i) => (
+              <View key={i} style={styles.errorRow}>
+                <Ionicons
+                  name={err.code?.startsWith('shallow') || err.code === 'incomplete_curl' ? 'close-circle' : 'warning'}
+                  size={14}
+                  color={err.code?.startsWith('shallow') ? C.red : C.gold}
+                />
+                <Text style={[styles.errorText, { color: err.code?.startsWith('shallow') ? C.red : C.gold }]}>
+                  {err.message}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
       </View>
 
       {/* Bottom Panel */}
@@ -1051,6 +1168,9 @@ const styles = StyleSheet.create({
     borderWidth: 2,
   },
   feedbackText: { fontSize: IS_SMALL ? 15 : 18, fontWeight: '900', textAlign: 'center' },
+  errorList: { marginTop: 10, gap: 6, width: '100%' },
+  errorRow: { flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center' },
+  errorText: { fontSize: 12, color: C.red, fontWeight: '700', flexShrink: 1, textAlign: 'center' },
   bottomPanel: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     backgroundColor: C.surface + 'F5',

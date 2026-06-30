@@ -172,7 +172,16 @@ def analyze_pose():
         result = analyze_pose_from_image(frame, exercise)
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": str(e), "angle": 135, "is_correct": True}), 200
+        return jsonify({
+            "error": str(e),
+            "angle": 135,
+            "is_correct": False,
+            "detected": False,
+            "form_errors": [],
+            "form_warnings": [],
+            "position": "none",
+            "thresholds": {"down_enter": 110, "up_enter": 150, "inverted": False},
+        }), 200
 
 
 # ─── PLAN GENERATION ──────────────────────────────────────────────────────────
