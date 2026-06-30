@@ -322,10 +322,11 @@ export default function ProfileScreen({ navigation }) {
 
   const handleLogout = () => {
     const doLogout = async () => {
-      if (firebaseAuth.isAvailable()) await firebaseAuth.logout();
-      else await AsyncStorage.multiRemove(['userToken', 'userData']);
+      await AsyncStorage.multiRemove(['userToken', 'userData']);
+      if (firebaseAuth.isAvailable()) {
+        try { await firebaseAuth.logout(); } catch (_) {}
+      }
 
-      // In nested navigators, replace may exist on parent stack.
       const rootNav = navigation.getParent?.() || navigation;
       if (rootNav.replace) rootNav.replace('Auth');
       else navigation.navigate('Auth');

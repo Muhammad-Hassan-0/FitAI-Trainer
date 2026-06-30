@@ -14,7 +14,7 @@ import * as Speech from 'expo-speech';
 import { C } from '../theme';
 import YouTubePlayer from '../components/YouTubePlayer';
 import { getExerciseVideoId } from '../data/exerciseVideos';
-import { createRepCounter } from '../utils/repCounter';
+import { createRepCounter, EXERCISE_TRACKING } from '../utils/repCounter';
 
 const { width, height } = Dimensions.get('window');
 const IS_SMALL = width < 360;
@@ -170,6 +170,9 @@ export default function LiveExerciseScreen({ route, navigation }) {
   const nextExercise = route?.params?.nextExercise || null;
   const completionKey = route?.params?.completionKey || null;
 
+  const tracking = EXERCISE_TRACKING[exercise.id] || EXERCISE_TRACKING.squat;
+  const cameraHint = tracking.cameraHint;
+
   const [permission, setPermission] = useState(null);
   const [phase, setPhase] = useState(PHASES.TUTORIAL);
   const [countdown, setCountdown] = useState(3);
@@ -183,10 +186,11 @@ export default function LiveExerciseScreen({ route, navigation }) {
   const [set, setSet] = useState(1);
   const [isProcessing, setIsProcessing] = useState(false);
   const [formErrors, setFormErrors] = useState([]);
-  const [facing, setFacing] = useState('back');
+  const [facing, setFacing] = useState(tracking.facing === 'front' ? 'front' : 'back');
+  const [isTracking, setIsTracking] = useState(false);
   const [aiFeeback, setAiFeedback] = useState('');
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
-  const [accuracy, setAccuracy] = useState(100);
+  const [accuracy, setAccuracy] = useState(0);
   const [goodReps, setGoodReps] = useState(0);
   const [skeletonPulse] = useState(new Animated.Value(1));
   const angleAnim = useRef(new Animated.Value(0)).current;
@@ -228,9 +232,10 @@ export default function LiveExerciseScreen({ route, navigation }) {
 
   if (!repCounterRef.current) {
     repCounterRef.current = createRepCounter({
-      inverted: exercise.id === 'curl',
-      downEnter: exercise.id === 'curl' ? 50 : 110,
-      upEnter: exercise.id === 'curl' ? 140 : 150,
+      inverted: tracking.inverted,
+      downEnter: tracking.downEnter,
+      upEnter: tracking.upEnter,
+      bottomFramesRequired: exercise.id === 'curl' ? 1 : 2,
     });
   }
 
@@ -277,7 +282,9 @@ export default function LiveExerciseScreen({ route, navigation }) {
     setGoodReps(0);
     setFormErrors([]);
     setTimer(0);
-    setFeedback('Stand 6 feet back — full body visible, then start moving!');
+    setAccuracy(0);
+    setIsTracking(false);
+    setFeedback(cameraHint);
     setFeedbackColor(C.lime);
     repCounterRef.current?.reset();
     missedFramesRef.current = 0;
@@ -301,19 +308,23 @@ export default function LiveExerciseScreen({ route, navigation }) {
 
       const photo = await cameraRef.current.takePictureAsync({
         base64: true,
-        quality: 0.4,
-        skipProcessing: true,
+        quality: 0.55,
+        skipProcessing: Platform.OS === 'android',
+        exif: false,
       });
 
       data = await poseAPI.analyzeFrame(photo.base64, exercise.id);
 
-      if (!data || data.detected === false) {
+      if (!data || data.detected === false || data.angle == null) {
         missedFramesRef.current += 1;
-        if (missedFramesRef.current >= 4) {
-          setFeedback('Adjust camera — show your full body from head to feet');
+        setIsTracking(false);
+        const hint = data?.camera_hint || data?.feedback || cameraHint;
+        if (missedFramesRef.current >= 2) {
+          setFeedback(hint);
           setFeedbackColor(C.gold);
-          setFormErrors(data?.form_warnings || [{ message: 'Body not fully visible' }]);
-        } else if (lastPoseRef.current) {
+          setFormErrors(data?.form_warnings || [{ message: hint }]);
+        }
+        if (lastPoseRef.current && missedFramesRef.current < 5) {
           handlePoseData(lastPoseRef.current, true);
         }
         return;
@@ -321,6 +332,7 @@ export default function LiveExerciseScreen({ route, navigation }) {
 
       missedFramesRef.current = 0;
       lastPoseRef.current = data;
+      setIsTracking(true);
       handlePoseData(data);
     } catch (_) {
       missedFramesRef.current += 1;
@@ -335,7 +347,7 @@ export default function LiveExerciseScreen({ route, navigation }) {
 
   const simulatePoseDetection = () => {
     const cycle = Math.floor(Date.now() / 2200) % 2;
-    const angle = cycle === 0 ? 95 : 165;
+    const angle = cycle === 0 ? 55 : 145;
     handlePoseData({
       angle,
       joint: config.joint,
@@ -347,9 +359,9 @@ export default function LiveExerciseScreen({ route, navigation }) {
       depth_ok: cycle === 0,
       position: cycle === 0 ? 'bottom' : 'top',
       thresholds: {
-        down_enter: exercise.id === 'curl' ? 50 : 110,
-        up_enter: exercise.id === 'curl' ? 140 : 150,
-        inverted: exercise.id === 'curl',
+        down_enter: tracking.downEnter,
+        up_enter: tracking.upEnter,
+        inverted: tracking.inverted,
       },
     });
   };
@@ -366,6 +378,12 @@ export default function LiveExerciseScreen({ route, navigation }) {
     const roundedAngle = Math.round(angle);
     setCurrentAngle(roundedAngle);
     Animated.timing(angleAnim, { toValue: roundedAngle, duration: 200, useNativeDriver: false }).start();
+
+    const conf = data.confidence ?? 0;
+    if (!isCached) {
+      setAccuracy(Math.round(conf));
+      setIsTracking(conf >= 20);
+    }
 
     const errors = data.form_errors || [];
     const warnings = data.form_warnings || [];
@@ -836,10 +854,16 @@ export default function LiveExerciseScreen({ route, navigation }) {
       {/* Accuracy HUD — top left */}
       {isStarted && (
         <View style={styles.accuracyHUD}>
-          <View style={[styles.accuracyRing, { borderColor: accuracy > 80 ? C.lime : accuracy > 60 ? C.gold : C.red }]}>
-            <Text style={[styles.accuracyVal, { color: accuracy > 80 ? C.lime : accuracy > 60 ? C.gold : C.red }]}>{accuracy}%</Text>
+          <View style={[styles.accuracyRing, {
+            borderColor: isTracking ? (accuracy > 60 ? C.lime : C.gold) : C.red,
+          }]}>
+            <Text style={[styles.accuracyVal, {
+              color: isTracking ? (accuracy > 60 ? C.lime : C.gold) : C.red,
+            }]}>
+              {isTracking ? `${accuracy}%` : '—'}
+            </Text>
           </View>
-          <Text style={styles.accuracyLabel}>Form</Text>
+          <Text style={styles.accuracyLabel}>{isTracking ? 'Tracking' : 'No signal'}</Text>
         </View>
       )}
 

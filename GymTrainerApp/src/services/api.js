@@ -48,7 +48,14 @@ const request = async (method, endpoint, body = null) => {
       }
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const text = await response.text();
+        let body = {};
+        try {
+          body = text ? JSON.parse(text) : {};
+        } catch (_) {}
+        const err = new Error(body.error || `HTTP ${response.status}`);
+        err.httpStatus = response.status;
+        throw err;
       }
 
       const text = await response.text();
@@ -116,9 +123,10 @@ const flushSessionSyncQueue = async () => {
 
 export const authAPI = {
   register: (name, email, password) =>
-    request('POST', '/auth/register', { name, email, password }),
+    request('POST', '/auth/register', { name, email: email.trim().toLowerCase(), password }),
   login: (email, password) =>
-    request('POST', '/auth/login', { email, password }),
+    request('POST', '/auth/login', { email: email.trim().toLowerCase(), password }),
+  me: () => request('GET', '/auth/me'),
 };
 
 export const poseAPI = {

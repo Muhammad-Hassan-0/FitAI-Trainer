@@ -151,6 +151,23 @@ def login():
     })
 
 
+@app.route("/api/auth/me", methods=["GET"])
+def auth_me():
+    """Validate token and return current user."""
+    user_id = parse_bearer_user_id()
+    if not user_id:
+        return jsonify({"success": False, "error": "Invalid or expired session"}), 401
+
+    user = User.query.filter_by(id=user_id).first()
+    if not user:
+        return jsonify({"success": False, "error": "User not found"}), 401
+
+    return jsonify({
+        "success": True,
+        "user": {"id": user.id, "name": user.name, "email": user.email},
+    })
+
+
 # ─── POSE ANALYSIS ────────────────────────────────────────────────────────────
 @app.route("/api/analyze-pose", methods=["POST"])
 def analyze_pose():
@@ -409,8 +426,9 @@ def health():
 
 
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    debug = os.environ.get("FLASK_DEBUG", "false").lower() in ("1", "true", "yes")
     print("Gym Trainer Backend Starting...")
-    print("API URL: http://localhost:5000/api")
-    print("Android Emulator URL: http://10.0.2.2:5000/api")
-    print(f"Database: {app.config['SQLALCHEMY_DATABASE_URI']}")
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    print(f"API URL: http://0.0.0.0:{port}/api")
+    print(f"Database: {app.config['SQLALCHEMY_DATABASE_URI'].split('@')[-1] if '@' in app.config['SQLALCHEMY_DATABASE_URI'] else 'sqlite local'}")
+    app.run(host="0.0.0.0", port=port, debug=debug)

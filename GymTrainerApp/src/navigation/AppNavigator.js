@@ -6,6 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { View, ActivityIndicator, Platform, Text, DeviceEventEmitter } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C } from '../theme';
+import { authAPI } from '../services/api';
 
 import SplashScreen from '../screens/SplashScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
@@ -140,13 +141,41 @@ export default function AppNavigator() {
     try {
       const token = await AsyncStorage.getItem('userToken');
       const onboardingDone = await AsyncStorage.getItem('onboardingDone');
-      if (token) {
-        setInitialRoute('Main');
-      } else if (onboardingDone) {
-        setInitialRoute('Auth');
-      } else {
-        setInitialRoute('Splash');
+
+      if (!token) {
+        setInitialRoute(onboardingDone ? 'Auth' : 'Splash');
+        return;
       }
+
+      if (token === 'guest_token') {
+        setInitialRoute('Main');
+        return;
+      }
+
+      if (token.startsWith('token_')) {
+        try {
+          const me = await authAPI.me();
+          if (me?.success && me?.user) {
+            await AsyncStorage.setItem('userData', JSON.stringify({
+              id: me.user.id,
+              name: me.user.name,
+              email: me.user.email,
+              isGuest: false,
+            }));
+            setInitialRoute('Main');
+            return;
+          }
+        } catch (_) {
+          // invalid / expired session
+        }
+        await AsyncStorage.multiRemove(['userToken', 'userData']);
+        setInitialRoute('Auth');
+        return;
+      }
+
+      // Unknown token format — force re-login
+      await AsyncStorage.multiRemove(['userToken', 'userData']);
+      setInitialRoute('Auth');
     } catch {
       setInitialRoute('Splash');
     }

@@ -80,31 +80,49 @@ export default function AuthScreen({ navigation }) {
   const handle = async () => {
     setError('');
     const { name, email, password } = form;
-    if (!email || !password) { setError('Email and password are required.'); return; }
-    if (mode === 'signup' && !name) { setError('Please enter your full name.'); return; }
-    if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail || !password) {
+      setError('Email and password are required.');
+      return;
+    }
+    if (mode === 'signup' && !name.trim()) {
+      setError('Please enter your full name.');
+      return;
+    }
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
 
     setLoading(true);
     try {
       const res = await authWithRetry(() => (
         mode === 'signup'
-          ? authAPI.register(name.trim(), email.trim(), password)
-          : authAPI.login(email.trim(), password)
+          ? authAPI.register(name.trim(), normalizedEmail, password)
+          : authAPI.login(normalizedEmail, password)
       ), 1);
 
-      if (!res?.success) {
+      if (!res?.success || !res?.token) {
         setError(authErrorMessage(res?.error || 'Authentication failed.'));
         return;
       }
 
       const userData = {
-        ...(res.user || {}),
-        name: res?.user?.name || (mode === 'signup' ? name : email.split('@')[0]),
-        email: res?.user?.email || email,
+        id: res.user?.id,
+        name: res.user?.name || name.trim(),
+        email: res.user?.email || normalizedEmail,
         joinDate: new Date().toISOString(),
+        isGuest: false,
       };
-      await AsyncStorage.setItem('userToken', res.token || ('token_' + Date.now()));
+
+      await AsyncStorage.setItem('userToken', res.token);
       await AsyncStorage.setItem('userData', JSON.stringify(userData));
+
       if (mode === 'signup') {
         await AsyncStorage.setItem('onboardingPending', 'true');
         await AsyncStorage.removeItem('onboardingAnswers');
@@ -114,39 +132,32 @@ export default function AuthScreen({ navigation }) {
         navigation.replace('Main');
       }
     } catch (e) {
-      const msg = authErrorMessage(e?.message || 'Unable to reach server.');
-      // Delivery-safe fallback: allow local auth if backend is unreachable.
-      if (
-        String(e?.message || '').includes('Network request failed') ||
-        String(e?.message || '').includes('The user aborted a request') ||
-        String(e?.message || '').includes('Request timeout') ||
-        String(e?.message || '').includes('undefined is not a function')
-      ) {
-        const userData = {
-          name: mode === 'signup' ? name.trim() : email.split('@')[0],
-          email: email.trim(),
-          joinDate: new Date().toISOString(),
-          offlineMode: true,
-        };
-        await AsyncStorage.setItem('userToken', 'token_' + Date.now());
-        await AsyncStorage.setItem('userData', JSON.stringify(userData));
-        Alert.alert(
-          'Offline Login Mode',
-          'Server was unreachable, so local mode was used. Core app features remain available.'
-        );
-        navigation.replace('Main');
-      } else {
-        setError(msg);
-      }
+      setError(authErrorMessage(e?.message || 'Unable to reach server.'));
     } finally {
       setLoading(false);
     }
   };
 
-  const guestLogin = async () => {
-    await AsyncStorage.setItem('userToken', 'guest_token');
-    await AsyncStorage.setItem('userData', JSON.stringify({ name: 'Guest User', email: 'guest@fitai.app' }));
-    navigation.replace('Main');
+  const guestLogin = () => {
+    Alert.alert(
+      'Guest Mode',
+      'Guest mode is for quick demo only. Your progress will not be saved to a real account. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue as Guest',
+          onPress: async () => {
+            await AsyncStorage.setItem('userToken', 'guest_token');
+            await AsyncStorage.setItem('userData', JSON.stringify({
+              name: 'Guest User',
+              email: 'guest@fitai.app',
+              isGuest: true,
+            }));
+            navigation.replace('Main');
+          },
+        },
+      ],
+    );
   };
 
   return (

@@ -1,0 +1,18 @@
+modules = ["python-3.11"]
+
+run = "cd backend && pip install -r requirements.txt && python app.py"
+
+[nix]
+channel = "stable-24_05"
+
+[deployment]
+run = ["sh", "-c", "cd backend && pip install -r requirements.txt && python app.py"]
+deploymentTarget = "gce"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[env]
+PYTHONUNBUFFERED = "1"
+FLASK_DEBUG = "false"
